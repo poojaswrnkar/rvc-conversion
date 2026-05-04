@@ -1,0 +1,28 @@
+# Copy to `config.yaml` locally (do not commit secrets)
+
+qwen:
+  base_url: "http://localhost:8000/v1"
+  api_key: "local-no-key"
+  model: "Qwen/Qwen3.6-35B-A3B-FP8"
+  timeout_s: 180
+
+tts:
+  nobita_voice: "en-IN-PrabhatNeural"
+  doraemon_voice: "en-IN-NeerjaNeural"
+  rate: "+0%"
+  volume: "+0%"
+
+rvc:
+  enabled: false
+  cli_path: "./applio_segment_infer.py"
+  extra_args: ""
+  models:
+    nobita: "./models/nobita.pth"
+    doraemon: "./models/doraemon.pth"
+    nobita_index: "./models/nobita.index"
+    doraemon_index: "./models/doraemon.index"
+
+comfyui:
+  enabled: false
+  base_url: "http://127.0.0.1:8188"
+  workflow_json_path: "./comfy/workflows/character_gen.json"

@@ -1,0 +1,31 @@
+services:
+  doraemon-devs:
+    build: .
+    image: doraemon-devs:local
+    volumes:
+      - /home/pooja/Applio-RVC-Fork:/opt/Applio-RVC-Fork:ro
+      - ./models:/app/models
+      - ./outputs:/app/outputs
+    environment:
+      - APPLIO_ROOT=/opt/Applio-RVC-Fork
+      - APPLIO_DEVICE=cpu
+    command: ["--topic", "Docker Merge Conflicts"]
+
+  doraemon-devs-gpu:
+    build: .
+    image: doraemon-devs:local
+    volumes:
+      - /home/pooja/Applio-RVC-Fork:/opt/Applio-RVC-Fork:ro
+      - ./models:/app/models
+      - ./outputs:/app/outputs
+    environment:
+      - APPLIO_ROOT=/opt/Applio-RVC-Fork
+      - APPLIO_DEVICE=cuda:0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["--topic", "Docker Merge Conflicts"]

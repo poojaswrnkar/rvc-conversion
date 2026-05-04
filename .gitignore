@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets / machine-specific endpoints
+config.yaml
+
+# Generated artifacts
+outputs/
+
+# Model weights / downloads (keep repo small)
+models/**/*.pth
+models/**/*.pt
+models/**/*.onnx
+models/**/*.zip
+models/**/*.index
+models/**/nobita_tmp/
+models/**/doraemon_tmp/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Docker
+*.log
