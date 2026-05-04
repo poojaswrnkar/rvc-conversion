@@ -85,8 +85,9 @@ def run_rvc(
         subprocess.run(cmd_str, shell=True, check=True)
         return out_wav
 
+    py = cfg.rvc.python or sys.executable
     cmd = [
-        sys.executable,
+        str(py),
         str(cli),
         "--input",
         str(in_wav),
@@ -100,7 +101,18 @@ def run_rvc(
     if cfg.rvc.extra_args:
         cmd += cfg.rvc.extra_args.split()
 
-    subprocess.run(cmd, check=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        tail = (r.stderr or r.stdout or "").strip()
+        if tail:
+            tail = tail[-4000:]
+        hint = (
+            "RVC failed. Common causes: (1) this Python has no PyTorch — set rvc.python in config.yaml "
+            "to your Applio/conda interpreter, or export APPLIO_PYTHON=/path/to/that/python; "
+            "(2) wrong or missing .index path next to your .pth. "
+            f"Command: {' '.join(cmd[:6])} ...\n--- stderr/stdout ---\n{tail}"
+        )
+        raise RuntimeError(hint) from None
     return out_wav
 
 

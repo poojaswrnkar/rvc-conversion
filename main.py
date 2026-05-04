@@ -1,67 +1,42 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
-from doraemon_devs.audio_engine import concat_wavs, render_segment_audio
-from doraemon_devs.comfyui_client import try_generate_image
 from doraemon_devs.config import load_config
+from doraemon_devs.pipeline import run_pipeline
+from doraemon_devs.schema import Script
 from doraemon_devs.script_generator import generate_script
-from doraemon_devs.utils import ensure_dir, slugify, timestamp_id
-
-
-def run(topic: str, config_path: str) -> Path:
-    cfg = load_config(config_path)
-    run_dir = ensure_dir(Path("outputs") / f"{slugify(topic)}_{timestamp_id()}")
-
-    script = generate_script(topic, cfg)
-    (run_dir / "script.json").write_text(script.model_dump_json(indent=2), encoding="utf-8")
-
-    images_dir = ensure_dir(run_dir / "images")
-    audio_dir = ensure_dir(run_dir / "audio_segments")
-
-    segment_wavs: list[Path] = []
-    for i, seg in enumerate(script.segments, start=1):
-        prompt = seg.mood_prompt or f"{seg.emotion} {seg.char}, 90s anime aesthetic, legally-distinct"
-        try:
-            try_generate_image(
-                cfg=cfg,
-                prompt_text=prompt,
-                out_dir=images_dir,
-                filename_prefix=f"{i:03d}_{seg.char}_{seg.emotion}",
-            )
-        except Exception:
-            # Visuals are optional; keep pipeline moving.
-            pass
-
-        wav = render_segment_audio(cfg=cfg, character=seg.char, text=seg.text, out_dir=audio_dir, idx=i)
-        segment_wavs.append(wav)
-
-    master_wav = run_dir / "master.wav"
-    concat_wavs(segment_wavs, master_wav)
-
-    manifest = {
-        "topic": topic,
-        "run_dir": str(run_dir),
-        "files": {
-            "script": str(run_dir / "script.json"),
-            "master_audio": str(master_wav),
-            "segments_dir": str(audio_dir),
-            "images_dir": str(images_dir),
-        },
-    }
-    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return run_dir
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Generate Dev-aemon style tech content locally.")
-    ap.add_argument("--topic", required=True, help="Tech topic, e.g. 'Docker Merge Conflicts'")
+    ap.add_argument("--topic", default=None, help="Tech topic for LLM script, e.g. 'Docker Merge Conflicts'")
     ap.add_argument("--config", default="config.yaml", help="Path to config.yaml")
+    ap.add_argument(
+        "--script-json",
+        default=None,
+        help="Skip LLM: load Script JSON from this file (title, topic, segments).",
+    )
+    ap.add_argument(
+        "--mp4",
+        action="store_true",
+        help="After audio, build master.mp4 (slideshow per segment + concat; needs ffmpeg).",
+    )
     args = ap.parse_args()
 
-    out = run(args.topic, args.config)
+    if not args.topic and not args.script_json:
+        ap.error("Provide --topic (LLM) or --script-json (hand-authored).")
+
+    cfg = load_config(args.config)
+
+    if args.script_json:
+        p = Path(args.script_json)
+        script = Script.model_validate_json(p.read_text(encoding="utf-8"))
+    else:
+        script = generate_script(args.topic, cfg)
+
+    out = run_pipeline(cfg, script, make_mp4=args.mp4)
     print(str(out))
 
 

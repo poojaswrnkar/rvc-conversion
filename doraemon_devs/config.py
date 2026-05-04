@@ -31,6 +31,8 @@ class RVCModels(BaseModel):
 
 class RVCConfig(BaseModel):
     enabled: bool = False
+    """Python that has torch + Applio deps (e.g. conda env). Falls back to current interpreter."""
+    python: str | None = None
     cli_path: str = "/absolute/path/to/applio_rvc_cli.py"
     extra_args: str = ""
     models: RVCModels = Field(default_factory=RVCModels)
@@ -71,8 +73,13 @@ def load_config(path: str | Path) -> AppConfig:
     if os.environ.get("QWEN_TIMEOUT_S"):
         cfg.qwen.timeout_s = int(os.environ["QWEN_TIMEOUT_S"])
 
+    if os.environ.get("APPLIO_PYTHON"):
+        cfg.rvc.python = os.environ["APPLIO_PYTHON"]
+
     # Normalize obvious path-like fields to posix strings (relative ok).
     cfg.rvc.cli_path = str(Path(cfg.rvc.cli_path))
+    if cfg.rvc.python:
+        cfg.rvc.python = str(Path(cfg.rvc.python))
     cfg.rvc.models.nobita = str(Path(cfg.rvc.models.nobita))
     cfg.rvc.models.doraemon = str(Path(cfg.rvc.models.doraemon))
     cfg.rvc.models.nobita_index = str(Path(cfg.rvc.models.nobita_index))

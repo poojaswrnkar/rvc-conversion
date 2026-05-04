@@ -14,6 +14,8 @@ tts:
 
 rvc:
   enabled: false
+  # Interpreter with torch + Applio deps (recommended). Same as export APPLIO_PYTHON=...
+  # python: "/home/you/miniconda3/envs/applio-py310/bin/python"
   cli_path: "./applio_segment_infer.py"
   extra_args: ""
   models:

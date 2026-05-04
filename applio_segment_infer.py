@@ -88,7 +88,22 @@ def main() -> None:
             str(args.protect),
         ]
 
-        subprocess.run(cmd, cwd=str(applio_root), check=True)
+        proc = subprocess.run(
+            cmd,
+            cwd=str(applio_root),
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip()
+            if tail:
+                tail = tail[-6000:]
+            raise RuntimeError(
+                "Applio infer_batch_rvc.py failed (is PyTorch installed in this Python?).\n"
+                f"Python: {python_exe}\n"
+                f"Applio: {applio_root}\n"
+                f"--- output ---\n{tail}"
+            )
 
         produced = out_dir / "segment.wav"
         if not produced.exists():
