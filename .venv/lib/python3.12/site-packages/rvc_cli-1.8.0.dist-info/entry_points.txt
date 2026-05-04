@@ -1,0 +1,2 @@
+[console_scripts]
+rvc-cli = rvc_cli.core:main

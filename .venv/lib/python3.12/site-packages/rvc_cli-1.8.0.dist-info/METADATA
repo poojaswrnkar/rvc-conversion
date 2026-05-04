@@ -1,0 +1,84 @@
+Metadata-Version: 2.2
+Name: rvc_cli
+Version: 1.8.0
+Summary: A simple, high-quality voice conversion tool.
+License: MIT
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests<2.32.0,>=2.31.0
+Requires-Dist: tqdm
+Requires-Dist: wget
+Requires-Dist: ffmpeg-python>=0.2.0
+Requires-Dist: faiss-cpu==1.7.3
+Requires-Dist: soundfile==0.12.1
+Requires-Dist: noisereduce
+Requires-Dist: pedalboard
+Requires-Dist: stftpitchshift
+Requires-Dist: yt-dlp==2025.01.26
+Requires-Dist: audio-separator[gpu]==0.28.5
+Requires-Dist: torch==2.3.1
+Requires-Dist: torchaudio==2.3.1
+Requires-Dist: torchvision==0.18.1
+Requires-Dist: torchcrepe==0.0.23
+Requires-Dist: torchfcpe
+Requires-Dist: libf0
+Requires-Dist: transformers==4.44.2
+Requires-Dist: matplotlib==3.7.2
+Requires-Dist: tensorboard
+Requires-Dist: tensorboardX
+Requires-Dist: pypresence
+Requires-Dist: beautifulsoup4
+Requires-Dist: flask
+Requires-Dist: pip>=23.3; sys_platform == "darwin"
+Requires-Dist: wheel; sys_platform == "darwin"
+Requires-Dist: PyYAML; sys_platform == "darwin"
+Requires-Dist: omegaconf>=2.0.6; sys_platform == "darwin"
+Requires-Dist: certifi>=2023.07.22; sys_platform == "darwin"
+Requires-Dist: antlr4-python3-runtime==4.8; sys_platform == "darwin"
+Requires-Dist: numba==0.57.0; sys_platform == "darwin"
+Requires-Dist: numba>=0.57.0; sys_platform == "linux"
+Requires-Dist: numba==0.57.0; sys_platform == "win32"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: black; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Provides-Extra: docs
+Requires-Dist: sphinx; extra == "docs"
+Requires-Dist: sphinx_rtd_theme; extra == "docs"
+
+<div align="center">
+
+# python rvc cli
+
+
+---
+
+**A simple, high-quality voice conversion tool.**
+
+</div>
+
+---
+
+## how to install
+
+```
+pip install rvc-cli
+```
+
+## usage
+
+```
+python rvc-cli -h
+```
+
+---
+
+<div align="center">
+
+Thanks to [rvc-cli](https://github.com/blaisewf/rvc-cli.git) by [blaisewf](https://github.com/blaisewf) for this project base
+
+</div>
