@@ -46,8 +46,21 @@ def try_generate_image(
 
     wf = _load_workflow(workflow_path)
 
+    # ComfyUI HTTP API expects a payload like:
+    #   { "prompt": { "<node_id>": { "class_type": "...", "inputs": { ... } }, ... }, ... }
+    #
+    # Users often save either:
+    # - the full request object (already contains "prompt"), or
+    # - just the prompt graph dict (node_id -> node_spec)
+    if isinstance(wf, dict) and "prompt" in wf and isinstance(wf["prompt"], dict):
+        prompt_graph = wf["prompt"]
+        payload: dict[str, Any] = dict(wf)
+    else:
+        prompt_graph = wf if isinstance(wf, dict) else {}
+        payload = {"prompt": prompt_graph}
+
     # Best-effort: set "text" field in the first node that looks like a CLIPTextEncode input.
-    for _node_id, node in (wf or {}).get("prompt", wf).items() if isinstance(wf, dict) else []:
+    for _node_id, node in (prompt_graph or {}).items():
         if not isinstance(node, dict):
             continue
         inputs = node.get("inputs")
@@ -55,7 +68,7 @@ def try_generate_image(
             inputs["text"] = prompt_text
             break
 
-    r = requests.post(f"{base}/prompt", json=wf, timeout=timeout_s)
+    r = requests.post(f"{base}/prompt", json=payload, timeout=timeout_s)
     if r.status_code != 200:
         raise ComfyUIError(f"ComfyUI /prompt failed: {r.status_code} {r.text[:200]}")
     prompt_id = r.json().get("prompt_id")
