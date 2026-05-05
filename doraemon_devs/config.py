@@ -42,6 +42,11 @@ class ComfyUIConfig(BaseModel):
     enabled: bool = False
     base_url: str = "http://127.0.0.1:8188"
     workflow_json_path: str = "./comfy/workflows/character_gen.json"
+    # Optional separate workflow for video clips (mp4/gif/webp) per segment.
+    # If not set, `workflow_json_path` is used.
+    video_workflow_json_path: str | None = None
+    # How long to poll ComfyUI history for results.
+    poll_timeout_s: int = 180
 
 
 class AppConfig(BaseModel):
@@ -85,6 +90,8 @@ def load_config(path: str | Path) -> AppConfig:
     cfg.rvc.models.nobita_index = str(Path(cfg.rvc.models.nobita_index))
     cfg.rvc.models.doraemon_index = str(Path(cfg.rvc.models.doraemon_index))
     cfg.comfyui.workflow_json_path = str(Path(cfg.comfyui.workflow_json_path))
+    if cfg.comfyui.video_workflow_json_path:
+        cfg.comfyui.video_workflow_json_path = str(Path(cfg.comfyui.video_workflow_json_path))
     return cfg
 
 

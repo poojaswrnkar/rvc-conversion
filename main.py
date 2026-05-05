@@ -23,6 +23,11 @@ def main() -> None:
         action="store_true",
         help="After audio, build master.mp4 (slideshow per segment + concat; needs ffmpeg).",
     )
+    ap.add_argument(
+        "--mp4-clips",
+        action="store_true",
+        help="Build master.mp4 from per-segment video clips via ComfyUI (needs a video workflow).",
+    )
     args = ap.parse_args()
 
     if not args.topic and not args.script_json:
@@ -36,7 +41,7 @@ def main() -> None:
     else:
         script = generate_script(args.topic, cfg)
 
-    out = run_pipeline(cfg, script, make_mp4=args.mp4)
+    out = run_pipeline(cfg, script, make_mp4=args.mp4, make_mp4_clips=args.mp4_clips)
     print(str(out))
 
 

@@ -69,9 +69,14 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.8,
+        # Prevent truncation; many vLLM/Qwen setups are verbose.
+        max_tokens=2500,
     )
 
-    content = (resp.choices[0].message.content or "").strip()
+    # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
+    # return text in `reasoning` with `content=None`.
+    msg = resp.choices[0].message
+    content = (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
     data = _extract_json(content)
     data.setdefault("topic", topic)
     script = Script.model_validate(data)

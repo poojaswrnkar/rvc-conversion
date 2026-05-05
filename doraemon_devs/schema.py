@@ -15,6 +15,10 @@ class Segment(BaseModel):
     emotion: Emotion = "explainer"
     scene: int = Field(ge=1, le=4, default=1)
     mood_prompt: str | None = None
+    # Optional: richer visual direction (esp. for video workflows)
+    video_prompt: str | None = None
+    # Optional: planning hint; pipeline still uses real audio duration when available.
+    duration_s: float | None = Field(default=None, gt=0)
 
     @field_validator("char", mode="before")
     @classmethod

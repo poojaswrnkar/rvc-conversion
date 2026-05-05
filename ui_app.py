@@ -35,6 +35,10 @@ def main() -> None:
         "Build master.mp4 (needs ffmpeg on PATH; uses Comfy images if present, else black slides)",
         value=False,
     )
+    make_mp4_clips = st.checkbox(
+        "Build master.mp4 from per-line ComfyUI video clips (GPU recommended; requires a video workflow JSON)",
+        value=False,
+    )
 
     if st.button("Generate audio (and optional video)", type="primary"):
         if not dialogue.strip():
@@ -44,10 +48,12 @@ def main() -> None:
             cfg = load_config(cfg_path)
             script = parse_dialogue_text(title=title, topic=topic, text=dialogue)
             with st.spinner("Running pipeline…"):
-                run_dir = run_pipeline(cfg, script, make_mp4=make_mp4)
+                run_dir = run_pipeline(cfg, script, make_mp4=make_mp4, make_mp4_clips=make_mp4_clips)
             st.success(f"Output: `{run_dir}`")
             st.json({"master_wav": str(run_dir / "master.wav"), "script": str(run_dir / "script.json")})
             if make_mp4 and (run_dir / "master.mp4").is_file():
+                st.video(str(run_dir / "master.mp4"))
+            if make_mp4_clips and (run_dir / "master.mp4").is_file():
                 st.video(str(run_dir / "master.mp4"))
         except Exception as e:
             st.exception(e)
