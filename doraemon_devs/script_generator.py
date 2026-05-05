@@ -69,8 +69,8 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.4,
-        # Prevent truncation; many vLLM/Qwen setups are verbose.
-        max_tokens=2500,
+        # Keep generations short; some Qwen/vLLM configs emit long "reasoning".
+        max_tokens=900,
     )
 
     # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
