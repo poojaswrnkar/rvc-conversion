@@ -35,7 +35,7 @@ OUTPUT REQUIREMENTS:
 }
 
 Rules:
-- 10-18 segments total; keep lines short for TTS.
+- 6-8 segments total; keep lines short for TTS.
 - Alternate characters frequently.
 - Include at least 1 concrete technical tip/command in Scene 3.
 - Avoid real IP/copyright names; say "Doraemon-proxy" only in mood_prompt if needed.
@@ -68,7 +68,7 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.8,
+        temperature=0.4,
         # Prevent truncation; many vLLM/Qwen setups are verbose.
         max_tokens=2500,
     )

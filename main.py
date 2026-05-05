@@ -37,10 +37,13 @@ def main() -> None:
 
     if args.script_json:
         p = Path(args.script_json)
+        print("Loading script JSON…")
         script = Script.model_validate_json(p.read_text(encoding="utf-8"))
     else:
+        print("Generating script with LLM…")
         script = generate_script(args.topic, cfg)
 
+    print("Rendering audio/visuals…")
     out = run_pipeline(cfg, script, make_mp4=args.mp4, make_mp4_clips=args.mp4_clips)
     print(str(out))
 
