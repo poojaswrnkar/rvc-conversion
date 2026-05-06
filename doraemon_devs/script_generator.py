@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from openai import OpenAI
+from pydantic import ValidationError
 
 from .config import AppConfig
 from .schema import Script
@@ -53,6 +55,8 @@ JSON schema:
 mood_prompt should be a short image prompt: character + mood + "90s anime aesthetic, legally-distinct".
 """
 
+_OUTLINE_LINE_RE = re.compile(r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$")
+
 
 def _extract_json(text: str) -> dict[str, Any]:
     """
@@ -86,16 +90,24 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise ValueError(f"Could not find a JSON object in LLM output. Snippet:\n{snippet}")
 
 
-def generate_script(topic: str, cfg: AppConfig) -> Script:
-    client = OpenAI(
-        base_url=cfg.qwen.base_url,
-        api_key=cfg.qwen.api_key,
-        timeout=cfg.qwen.timeout_s,
-    )
+def _outline_line_count(outline: str) -> int:
+    n = 0
+    for line in outline.splitlines():
+        if _OUTLINE_LINE_RE.match(line):
+            n += 1
+    return n
 
-    outline_user = f"Tech topic: {topic}\nWrite the outline now."
+
+def _fetch_outline(*, client: OpenAI, model: str, topic: str) -> str:
+    outline_user = (
+        f"Tech topic: {topic}\n"
+        "Write the outline now.\n"
+        "You MUST output between 6 and 8 lines inclusive.\n"
+        "Each line MUST match: N|scene|emotion|text OR D|scene|emotion|text\n"
+        "Do not output fewer than 6 lines.\n"
+    )
     outline_resp = client.chat.completions.create(
-        model=cfg.qwen.model,
+        model=model,
         messages=[
             {"role": "system", "content": OUTLINE_SYSTEM},
             {"role": "user", "content": outline_user},
@@ -107,27 +119,64 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
     outline = (getattr(outline_msg, "content", None) or getattr(outline_msg, "reasoning", None) or "").strip()
     if not outline:
         raise ValueError("LLM returned empty outline.")
+    return outline
 
-    json_user = (
-        f"Topic slug for JSON.topic field: {topic}\n"
-        f"Pick a catchy JSON.title.\n"
-        f"Convert this outline into JSON:\n\n{outline}\n"
-    )
-    json_resp = client.chat.completions.create(
-        model=cfg.qwen.model,
-        messages=[
-            {"role": "system", "content": JSON_FORMAT_SYSTEM},
-            {"role": "user", "content": json_user},
-        ],
-        temperature=0.0,
-        max_tokens=1400,
+
+def generate_script(topic: str, cfg: AppConfig) -> Script:
+    client = OpenAI(
+        base_url=cfg.qwen.base_url,
+        api_key=cfg.qwen.api_key,
+        timeout=cfg.qwen.timeout_s,
     )
 
-    # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
-    # return text in `reasoning` with `content=None`.
-    msg = json_resp.choices[0].message
-    content = (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
-    data = _extract_json(content)
-    data.setdefault("topic", topic)
-    script = Script.model_validate(data)
-    return script
+    outline = ""
+    for _ in range(2):
+        outline = _fetch_outline(client=client, model=cfg.qwen.model, topic=topic)
+        if _outline_line_count(outline) >= 6:
+            break
+    if _outline_line_count(outline) < 4:
+        snippet = outline[:2000]
+        raise ValueError(
+            "Outline had too few valid lines. Expected format N|scene|emotion|text per line.\n"
+            f"Got {_outline_line_count(outline)} valid lines. Snippet:\n{snippet}"
+        )
+
+    last_err: Exception | None = None
+    for attempt in range(3):
+        json_user = (
+            f"Topic slug for JSON.topic field: {topic}\n"
+            f"Pick a catchy JSON.title.\n"
+            f"Convert EVERY line of the outline into EXACTLY one segment.\n"
+            f"The segments array MUST contain 6-8 items (minimum 4).\n"
+            f"Do not merge lines. Do not drop lines.\n\n"
+            f"Outline:\n{outline}\n"
+        )
+        if attempt > 0 and last_err is not None:
+            json_user += (
+                f"\nYour previous JSON was invalid: {last_err}\n"
+                "Fix it. Ensure segments length is 6-8.\n"
+            )
+
+        json_resp = client.chat.completions.create(
+            model=cfg.qwen.model,
+            messages=[
+                {"role": "system", "content": JSON_FORMAT_SYSTEM},
+                {"role": "user", "content": json_user},
+            ],
+            temperature=0.0,
+            max_tokens=1800,
+        )
+
+        # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
+        # return text in `reasoning` with `content=None`.
+        msg = json_resp.choices[0].message
+        content = (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
+        try:
+            data = _extract_json(content)
+            data.setdefault("topic", topic)
+            return Script.model_validate(data)
+        except (ValueError, json.JSONDecodeError, ValidationError) as e:
+            last_err = e
+            continue
+
+    raise RuntimeError(f"Failed to generate a valid Script after retries. Last error: {last_err}")
