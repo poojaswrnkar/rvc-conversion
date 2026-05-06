@@ -13,22 +13,28 @@ from .schema import Script
 
 OUTLINE_SYSTEM = """Write a Dev-aemon style script (Hinglish + 2026 dev slang).
 
-Your ENTIRE reply must be 6 to 8 lines.
-Each line MUST look exactly like:
+Your ENTIRE reply must be EXACTLY 6 lines (no more, no less).
+Each line MUST be ONLY this pipe format:
 
-N|1|panicking|Short line here
-D|2|calm|Short line here
+N|scene|emotion|spoken_line
+or
+D|scene|emotion|spoken_line
 
-Rules per line:
-- Start with N (Nobita) or D (Doraemon)
-- scene is 1-4
+Rules:
+- N = Nobita, D = Doraemon
+- scene is 1-4 (integer)
 - emotion is a short English label
-- last field is the spoken line (short, TTS-friendly)
+- spoken_line is short, natural dialogue (may include Hindi+English mix)
+- Do NOT copy template phrases like "Short line here"
+- Do NOT explain, do NOT number steps, do NOT use markdown, do NOT use backticks
 
-Content:
-- Alternate N and D
-- Scene 3 must include one real terminal/command snippet (e.g. git/docker) inside the line text
-- Do not mention real anime/cartoon IP; keep it a generic parody vibe
+Story beats:
+- Lines 1-2: Nobita stressed about the topic; Doraemon calms / teases
+- Lines 3-4: Doraemon introduces a "gadget" fix; Nobita reacts
+- Line 5: concrete terminal/command tip inside spoken_line (git/docker/etc.)
+- Line 6: funny chaos ending
+
+Keep it a generic parody vibe (no real anime/cartoon IP names).
 """
 
 
@@ -56,9 +62,30 @@ _OUTLINE_LINE_RE = re.compile(
     r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$"
 )
 # Same pattern, but can appear anywhere in a noisy line (model adds bullets/backticks)
-_OUTLINE_LINE_FIND_RE = re.compile(
-    r"([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)(?:\s*`*)$"
-)
+_OUTLINE_LINE_FIND_RE = re.compile(r"([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+)$")
+
+
+def _clean_spoken_field(s: str) -> str:
+    s = s.strip().strip("`").strip('"').strip("'")
+    return s.strip()
+
+
+def _is_junk_outline_line(spoken: str) -> bool:
+    t = spoken.lower()
+    if len(spoken.strip()) < 8:
+        return True
+    junk_markers = (
+        "short line here",
+        "wait,",
+        "the format says",
+        "i'll follow",
+        "thinking process",
+        "analyze user",
+        "example shows",
+        "template",
+        "```",
+    )
+    return any(m in t for m in junk_markers)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -106,13 +133,19 @@ def _extract_outline_lines(raw: str) -> list[str]:
             continue
         m = _OUTLINE_LINE_RE.match(s)
         if m:
-            lines.append(f"{m.group(1)}|{m.group(2)}|{m.group(3).strip()}|{m.group(4).strip()}")
+            spoken = _clean_spoken_field(m.group(4))
+            emotion = m.group(3).strip()
+            if _is_junk_outline_line(spoken):
+                continue
+            lines.append(f"{m.group(1)}|{m.group(2)}|{emotion}|{spoken}")
             continue
         m2 = _OUTLINE_LINE_FIND_RE.search(s)
         if m2:
-            lines.append(
-                f"{m2.group(1)}|{m2.group(2)}|{m2.group(3).strip()}|{m2.group(4).strip()}"
-            )
+            spoken = _clean_spoken_field(m2.group(4))
+            emotion = m2.group(3).strip()
+            if _is_junk_outline_line(spoken):
+                continue
+            lines.append(f"{m2.group(1)}|{m2.group(2)}|{emotion}|{spoken}")
     return lines
 
 
@@ -120,18 +153,20 @@ def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> s
     if strict:
         outline_user = (
             f"Tech topic: {topic}\n"
-            "Reply with ONLY 6 lines in the pipe format. No other words.\n"
+            "Output EXACTLY 6 lines.\n"
+            "Each line must start with N| or D| and contain exactly 3 pipe characters.\n"
+            "No blank lines. No other text.\n"
         )
         temp = 0.0
-        max_tok = 350
+        max_tok = 500
     else:
         outline_user = (
             f"Tech topic: {topic}\n"
-            "Write 6-8 outline lines in the pipe format.\n"
-            "If you start explaining, you failed—delete it and output only lines.\n"
+            "Output EXACTLY 6 lines in the pipe format.\n"
+            "If you output anything except those 6 lines, you failed.\n"
         )
-        temp = 0.2
-        max_tok = 500
+        temp = 0.1
+        max_tok = 650
 
     outline_resp = client.chat.completions.create(
         model=model,
@@ -158,11 +193,11 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
     )
 
     outline = ""
-    for strict in (True, False, False):
+    for strict in (True, True, False, False):
         outline = _fetch_outline(client=client, model=cfg.qwen.model, topic=topic, strict=strict)
         if _outline_line_count(outline) >= 6:
             break
-    if _outline_line_count(outline) < 4:
+    if _outline_line_count(outline) < 6:
         snippet = outline[:2000]
         raise ValueError(
             "Outline had too few valid lines. Expected format N|scene|emotion|text per line.\n"
