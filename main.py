@@ -28,6 +28,11 @@ def main() -> None:
         action="store_true",
         help="Build master.mp4 from per-segment video clips via ComfyUI (needs a video workflow).",
     )
+    ap.add_argument(
+        "--motion",
+        action="store_true",
+        help="Same as --mp4-clips (per-segment Comfy video; use LTX or other motion workflow in config).",
+    )
     args = ap.parse_args()
 
     if not args.topic and not args.script_json:
@@ -44,7 +49,8 @@ def main() -> None:
         script = generate_script(args.topic, cfg)
 
     print("Rendering audio/visuals…")
-    out = run_pipeline(cfg, script, make_mp4=args.mp4, make_mp4_clips=args.mp4_clips)
+    make_clips = args.mp4_clips or args.motion
+    out = run_pipeline(cfg, script, make_mp4=args.mp4, make_mp4_clips=make_clips)
     print(str(out))
 
 

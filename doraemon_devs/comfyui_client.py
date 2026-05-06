@@ -34,6 +34,33 @@ def _apply_checkpoint_override(prompt_graph: dict[str, Any], checkpoint_filename
             inputs["ckpt_name"] = checkpoint_filename
 
 
+def _apply_prompt_override(
+    prompt_graph: dict[str, Any],
+    prompt_text: str,
+    *,
+    prompt_node_id: str | None,
+    prompt_input_key: str,
+) -> None:
+    if not prompt_graph:
+        return
+    key = (prompt_input_key or "text").strip() or "text"
+    if prompt_node_id:
+        nid = str(prompt_node_id).strip()
+        node = prompt_graph.get(nid)
+        if isinstance(node, dict):
+            inputs = node.get("inputs")
+            if isinstance(inputs, dict) and key in inputs and isinstance(inputs[key], str):
+                inputs[key] = prompt_text
+                return
+    for _node_id, node in prompt_graph.items():
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and "text" in inputs and isinstance(inputs["text"], str):
+            inputs["text"] = prompt_text
+            break
+
+
 def _submit_workflow(
     *,
     base: str,
@@ -41,6 +68,8 @@ def _submit_workflow(
     prompt_text: str,
     timeout_s: int,
     checkpoint_filename: str | None = None,
+    prompt_node_id: str | None = None,
+    prompt_input_key: str = "text",
 ) -> str | None:
     wf = _load_workflow(workflow_path)
 
@@ -58,15 +87,12 @@ def _submit_workflow(
         payload = {"prompt": prompt_graph}
 
     _apply_checkpoint_override(prompt_graph, checkpoint_filename)
-
-    # Best-effort: set "text" field in the first node that looks like a CLIPTextEncode input.
-    for _node_id, node in (prompt_graph or {}).items():
-        if not isinstance(node, dict):
-            continue
-        inputs = node.get("inputs")
-        if isinstance(inputs, dict) and "text" in inputs and isinstance(inputs["text"], str):
-            inputs["text"] = prompt_text
-            break
+    _apply_prompt_override(
+        prompt_graph,
+        prompt_text,
+        prompt_node_id=prompt_node_id,
+        prompt_input_key=prompt_input_key,
+    )
 
     r = requests.post(f"{base}/prompt", json=payload, timeout=timeout_s)
     if r.status_code != 200:
@@ -126,6 +152,8 @@ def try_generate_media(
         prompt_text=prompt_text,
         timeout_s=30,
         checkpoint_filename=cfg.comfyui.checkpoint,
+        prompt_node_id=cfg.comfyui.prompt_node_id,
+        prompt_input_key=cfg.comfyui.prompt_input_key,
     )
     if not prompt_id:
         return None

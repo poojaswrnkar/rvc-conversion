@@ -47,6 +47,11 @@ class ComfyUIConfig(BaseModel):
     video_workflow_json_path: str | None = None
     # Overrides `ckpt_name` on every CheckpointLoaderSimple node (bundled workflows ship a placeholder).
     checkpoint: str | None = None
+    # API-format workflow node id (e.g. "12") whose string input receives the segment prompt.
+    # Required for most LTX / custom graphs (they are not "first CLIPTextEncode wins").
+    prompt_node_id: str | None = None
+    # Input field on that node: "text", "prompt", "string", etc.
+    prompt_input_key: str = "text"
     # How long to poll ComfyUI history for results.
     poll_timeout_s: int = 180
 

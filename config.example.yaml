@@ -29,8 +29,13 @@ comfyui:
   base_url: "http://127.0.0.1:8188"
   # Bundled vanilla txt2img → SaveImage (paths are relative to this YAML file).
   workflow_json_path: "./comfy/workflows/character_gen.json"
-  # Same graph by default; PNG/JPEG outputs are turned into per-segment MP4 via ffmpeg.
+  # Per-segment motion: point to an API-format workflow JSON (e.g. export from Comfy after installing
+  # ComfyUI-LTXVideo and loading an LTX-2.3 template). Run: python main.py --topic "..." --motion
   video_workflow_json_path: "./comfy/workflows/video_clip.json"
+  # LTX / custom graphs: in Comfy enable Dev mode → Save (API format) → find the text node id in JSON,
+  # then set prompt_node_id to that string key (e.g. "38") and prompt_input_key if not "text".
+  prompt_node_id: null
+  prompt_input_key: "text"
   # Must match a filename under ComfyUI/models/checkpoints/ on the Comfy host (see comfy/workflows/*.json).
   # Default in JSON matches Comfy's usual v1.5 name once you download it:
   #   wget -O models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors \
