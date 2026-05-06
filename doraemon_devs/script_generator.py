@@ -23,7 +23,8 @@ Scene 3: Realistic technical explanation (actionable) of how the gadget solves t
 Scene 4: Funny chaos ending where Nobita overuses it and breaks something
 
 OUTPUT REQUIREMENTS:
-- Output ONLY valid JSON (no markdown, no code fences).
+- Output ONLY valid JSON (no markdown, no code fences, no commentary, no "thinking process").
+- The first character of your reply MUST be `{` and the last character MUST be `}`.
 - Use this schema exactly:
 {
   "title": "...",
@@ -43,15 +44,35 @@ Rules:
 
 
 def _extract_json(text: str) -> dict[str, Any]:
-    text = text.strip()
-    if text.startswith("{") and text.endswith("}"):
-        return json.loads(text)
-    # If the model wrapped extra text, attempt to locate the first {...} block.
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
-    return json.loads(text)
+    """
+    vLLM/Qwen setups sometimes return long preambles (or put text in `reasoning`).
+    We decode the first complete JSON object in the string.
+    """
+    raw = text.strip()
+    if not raw:
+        raise ValueError("LLM returned empty text; cannot parse JSON.")
+
+    # Strip common ```json fences if present
+    if raw.startswith("```"):
+        first_nl = raw.find("\n")
+        if first_nl != -1:
+            raw = raw[first_nl + 1 :]
+        if raw.rstrip().endswith("```"):
+            raw = raw.rstrip()[:-3].rstrip()
+
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(raw[i:])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            continue
+
+    snippet = raw[:4000]
+    raise ValueError(f"Could not find a JSON object in LLM output. Snippet:\n{snippet}")
 
 
 def generate_script(topic: str, cfg: AppConfig) -> Script:
@@ -68,9 +89,9 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.4,
-        # Keep generations short; some Qwen/vLLM configs emit long "reasoning".
-        max_tokens=900,
+        temperature=0.2,
+        # Enough room for 6-8 segments; too small truncates before JSON closes.
+        max_tokens=1600,
     )
 
     # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
