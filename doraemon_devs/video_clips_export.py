@@ -22,11 +22,43 @@ def _mux_clip_with_audio(*, clip: Path, wav: Path, out_mp4: Path, width: int, he
     """
     Re-encode to a consistent format (H.264 + AAC, yuv420p) and attach segment audio.
     Uses -shortest so it ends with the shorter of audio/video.
+
+    Still images (.png/.jpg/...) are treated as a single frame looped for the full audio length.
     """
     vf = (
         f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p"
     )
+    suffix = clip.suffix.lower()
+    if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+        _run_ffmpeg(
+            [
+                "-loop",
+                "1",
+                "-i",
+                str(clip.resolve()),
+                "-i",
+                str(wav.resolve()),
+                "-vf",
+                vf,
+                "-shortest",
+                "-c:v",
+                "libx264",
+                "-tune",
+                "stillimage",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-ar",
+                "48000",
+                "-ac",
+                "1",
+                str(out_mp4.resolve()),
+            ]
+        )
+        return
+
     _run_ffmpeg(
         [
             "-i",

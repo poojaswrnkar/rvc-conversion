@@ -21,12 +21,26 @@ def _load_workflow(path: str | Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def _apply_checkpoint_override(prompt_graph: dict[str, Any], checkpoint_filename: str | None) -> None:
+    if not checkpoint_filename or not prompt_graph:
+        return
+    for node in prompt_graph.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") != "CheckpointLoaderSimple":
+            continue
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict) and "ckpt_name" in inputs:
+            inputs["ckpt_name"] = checkpoint_filename
+
+
 def _submit_workflow(
     *,
     base: str,
     workflow_path: Path,
     prompt_text: str,
     timeout_s: int,
+    checkpoint_filename: str | None = None,
 ) -> str | None:
     wf = _load_workflow(workflow_path)
 
@@ -42,6 +56,8 @@ def _submit_workflow(
     else:
         prompt_graph = wf if isinstance(wf, dict) else {}
         payload = {"prompt": prompt_graph}
+
+    _apply_checkpoint_override(prompt_graph, checkpoint_filename)
 
     # Best-effort: set "text" field in the first node that looks like a CLIPTextEncode input.
     for _node_id, node in (prompt_graph or {}).items():
@@ -104,7 +120,13 @@ def try_generate_media(
     if not workflow_path.exists():
         raise FileNotFoundError(f"ComfyUI workflow_json_path not found: {workflow_path}")
 
-    prompt_id = _submit_workflow(base=base, workflow_path=workflow_path, prompt_text=prompt_text, timeout_s=30)
+    prompt_id = _submit_workflow(
+        base=base,
+        workflow_path=workflow_path,
+        prompt_text=prompt_text,
+        timeout_s=30,
+        checkpoint_filename=cfg.comfyui.checkpoint,
+    )
     if not prompt_id:
         return None
 

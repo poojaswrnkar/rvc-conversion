@@ -45,6 +45,8 @@ class ComfyUIConfig(BaseModel):
     # Optional separate workflow for video clips (mp4/gif/webp) per segment.
     # If not set, `workflow_json_path` is used.
     video_workflow_json_path: str | None = None
+    # Overrides `ckpt_name` on every CheckpointLoaderSimple node (bundled workflows ship a placeholder).
+    checkpoint: str | None = None
     # How long to poll ComfyUI history for results.
     poll_timeout_s: int = 180
 
@@ -57,12 +59,21 @@ class AppConfig(BaseModel):
 
 
 def load_config(path: str | Path) -> AppConfig:
-    p = Path(path)
+    p = Path(path).expanduser()
     data: dict[str, Any] = {}
     if p.exists():
         with p.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     cfg = AppConfig.model_validate(data)
+
+    # Resolve repo-relative paths against the config file directory (not CWD).
+    base_dir = p.resolve().parent
+
+    def _resolve_cfg_path(s: str) -> str:
+        pp = Path(s)
+        if pp.is_absolute():
+            return str(pp)
+        return str((base_dir / pp).resolve())
 
     # Environment overrides (so you can keep secrets out of git).
     # Example:
@@ -81,17 +92,21 @@ def load_config(path: str | Path) -> AppConfig:
     if os.environ.get("APPLIO_PYTHON"):
         cfg.rvc.python = os.environ["APPLIO_PYTHON"]
 
-    # Normalize obvious path-like fields to posix strings (relative ok).
-    cfg.rvc.cli_path = str(Path(cfg.rvc.cli_path))
-    if cfg.rvc.python:
-        cfg.rvc.python = str(Path(cfg.rvc.python))
-    cfg.rvc.models.nobita = str(Path(cfg.rvc.models.nobita))
-    cfg.rvc.models.doraemon = str(Path(cfg.rvc.models.doraemon))
-    cfg.rvc.models.nobita_index = str(Path(cfg.rvc.models.nobita_index))
-    cfg.rvc.models.doraemon_index = str(Path(cfg.rvc.models.doraemon_index))
-    cfg.comfyui.workflow_json_path = str(Path(cfg.comfyui.workflow_json_path))
+    if os.environ.get("COMFY_CHECKPOINT"):
+        cfg.comfyui.checkpoint = os.environ["COMFY_CHECKPOINT"]
+
+    cfg.rvc.cli_path = _resolve_cfg_path(cfg.rvc.cli_path)
+    cfg.rvc.models.nobita = _resolve_cfg_path(cfg.rvc.models.nobita)
+    cfg.rvc.models.doraemon = _resolve_cfg_path(cfg.rvc.models.doraemon)
+    cfg.rvc.models.nobita_index = _resolve_cfg_path(cfg.rvc.models.nobita_index)
+    cfg.rvc.models.doraemon_index = _resolve_cfg_path(cfg.rvc.models.doraemon_index)
+    cfg.comfyui.workflow_json_path = _resolve_cfg_path(cfg.comfyui.workflow_json_path)
     if cfg.comfyui.video_workflow_json_path:
-        cfg.comfyui.video_workflow_json_path = str(Path(cfg.comfyui.video_workflow_json_path))
+        cfg.comfyui.video_workflow_json_path = _resolve_cfg_path(cfg.comfyui.video_workflow_json_path)
+
+    if cfg.rvc.python:
+        rp = Path(cfg.rvc.python).expanduser()
+        cfg.rvc.python = str(rp if rp.is_absolute() else (base_dir / rp).resolve())
     return cfg
 
 

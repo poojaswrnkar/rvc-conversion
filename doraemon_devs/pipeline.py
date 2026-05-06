@@ -50,8 +50,19 @@ def run_pipeline(
                     workflow_json_path=wf,
                     timeout_s=cfg.comfyui.poll_timeout_s,
                 )
-                # keep only mp4-ish for stitching; else ignore.
-                if clip and clip.suffix.lower() in {".mp4", ".webm", ".mov", ".mkv", ".gif", ".webp"}:
+                # Video files, animated formats, or stills (PNG from SaveImage → looped in mux).
+                _clip_ok = {
+                    ".mp4",
+                    ".webm",
+                    ".mov",
+                    ".mkv",
+                    ".gif",
+                    ".webp",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                }
+                if clip and clip.suffix.lower() in _clip_ok:
                     segment_clips.append(clip)
                 else:
                     segment_clips.append(None)
@@ -63,8 +74,8 @@ def run_pipeline(
                     filename_prefix=f"{i:03d}_{seg.char}_{seg.emotion}",
                 )
         except Exception:
-            segment_clips.append(None)
-            pass
+            if make_mp4_clips:
+                segment_clips.append(None)
 
         wav = render_segment_audio(cfg=cfg, character=seg.char, text=seg.text, out_dir=audio_dir, idx=i)
         segment_wavs.append(wav)

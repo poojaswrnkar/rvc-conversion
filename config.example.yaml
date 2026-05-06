@@ -27,4 +27,11 @@ rvc:
 comfyui:
   enabled: false
   base_url: "http://127.0.0.1:8188"
+  # Bundled vanilla txt2img → SaveImage (paths are relative to this YAML file).
   workflow_json_path: "./comfy/workflows/character_gen.json"
+  # Same graph by default; PNG/JPEG outputs are turned into per-segment MP4 via ffmpeg.
+  video_workflow_json_path: "./comfy/workflows/video_clip.json"
+  # Must match a filename inside ComfyUI's models/checkpoints/ (override default in JSON).
+  # Example: "realisticVisionV51_v51VAE.safetensors"
+  checkpoint: null
+  poll_timeout_s: 180
