@@ -35,6 +35,15 @@ def _core_invoker_path() -> Path:
     return (Path(__file__).resolve().parent / "applio_core_infer_once.py").resolve()
 
 
+def _rvc_repo_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def _resolve_asset(path: str | Path, repo_root: Path) -> Path:
+    p = Path(path).expanduser()
+    return p.resolve() if p.is_absolute() else (repo_root / p).resolve()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True, help="Input wav file")
@@ -57,11 +66,21 @@ def main() -> None:
     ap.add_argument("--protect", default=os.environ.get("APPLIO_PROTECT", "0.33"))
     args = ap.parse_args()
 
+    repo_root = _rvc_repo_root()
     applio_root = Path(args.applio_root).expanduser().resolve()
-    in_wav = Path(args.input).expanduser().resolve()
-    out_wav = Path(args.output).expanduser().resolve()
-    model_pth = Path(args.model).expanduser().resolve()
-    index_path = Path(args.index).expanduser().resolve()
+    in_wav = _resolve_asset(args.input, repo_root)
+    out_wav = _resolve_asset(args.output, repo_root)
+    model_pth = _resolve_asset(args.model, repo_root)
+    index_path = _resolve_asset(args.index, repo_root)
+
+    if not model_pth.is_file():
+        raise FileNotFoundError(
+            f"RVC model .pth not found: {model_pth}\n"
+            "Applio will leave vc=None and then crash with "
+            "'NoneType' object has no attribute 'pipeline'."
+        )
+    if not index_path.is_file():
+        raise FileNotFoundError(f"RVC index not found: {index_path}")
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
 
@@ -192,7 +211,7 @@ def _run_applio_core_infer(
         "f0_autotune": False,
         "f0_autotune_strength": 1.0,
         "proposed_pitch": False,
-        "proposed_pitch_threshold": 0.0,
+        "proposed_pitch_threshold": 155.0,
         "clean_audio": False,
         "clean_strength": 0.5,
         "export_format": "WAV",
@@ -220,10 +239,17 @@ def _run_applio_core_infer(
             tail = (proc.stderr or proc.stdout or "").strip()
             if tail:
                 tail = tail[-6000:]
+            extra = ""
+            if "has no attribute 'pipeline'" in tail and "NoneType" in tail:
+                extra = (
+                    "\nHint: Applio's VoiceConverter.vc was never built — almost always the .pth "
+                    "path was wrong or torch.load could not read the checkpoint (see Applio logs above).\n"
+                )
             raise RuntimeError(
                 "Applio core.run_infer_script failed (PyTorch / models / VRAM?).\n"
                 f"Python: {python_exe}\n"
                 f"Applio: {applio_root}\n"
+                f"{extra}"
                 f"--- output ---\n{tail}"
             )
     finally:

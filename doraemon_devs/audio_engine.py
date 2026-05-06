@@ -45,6 +45,19 @@ def _resolve_rvc_python(cfg: AppConfig) -> str:
     )
 
 
+def _rvc_repo_root(cli: Path) -> Path:
+    """Directory containing `applio_segment_infer.py` (repo root when cli is `./applio_segment_infer.py`)."""
+    return cli.expanduser().resolve().parent
+
+
+def _resolve_rvc_path(p: str | Path, repo_root: Path) -> Path:
+    """Resolve config paths like `./models/x.pth` against repo root when relative."""
+    pp = Path(p).expanduser()
+    if pp.is_absolute():
+        return pp.resolve()
+    return (repo_root / pp).resolve()
+
+
 async def tts_to_wav(
     *,
     text: str,
@@ -103,37 +116,53 @@ def run_rvc(
     if not cli.exists():
         raise FileNotFoundError(f"RVC cli_path not found: {cli}")
 
+    repo_root = _rvc_repo_root(cli)
+    model_abs = _resolve_rvc_path(model_pth, repo_root)
+    index_abs = _resolve_rvc_path(index_path, repo_root)
+    in_abs = Path(in_wav).expanduser().resolve()
+    out_abs = Path(out_wav).expanduser().resolve()
+    if not model_abs.is_file():
+        raise FileNotFoundError(
+            f"RVC model .pth not found: {model_abs}\n"
+            f"(resolved from config; repo root for relative paths: {repo_root})"
+        )
+    if not index_abs.is_file():
+        raise FileNotFoundError(
+            f"RVC index file not found: {index_abs}\n"
+            f"(resolved from config; repo root for relative paths: {repo_root})"
+        )
+
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     template = os.environ.get("APPLIO_CMD_TEMPLATE", "").strip()
     if template:
         cmd_str = template.format(
-            input=str(in_wav),
-            output=str(out_wav),
-            model=str(Path(model_pth)),
-            index=str(Path(index_path)),
+            input=str(in_abs),
+            output=str(out_abs),
+            model=str(model_abs),
+            index=str(index_abs),
         )
         if cfg.rvc.extra_args:
             cmd_str = f"{cmd_str} {cfg.rvc.extra_args}".strip()
-        subprocess.run(cmd_str, shell=True, check=True)
+        subprocess.run(cmd_str, shell=True, check=True, cwd=str(repo_root))
         return out_wav
 
     py = _resolve_rvc_python(cfg)
     cmd = [
         str(py),
-        str(cli),
+        str(cli.resolve()),
         "--input",
-        str(in_wav),
+        str(in_abs),
         "--output",
-        str(out_wav),
+        str(out_abs),
         "--model",
-        str(Path(model_pth)),
+        str(model_abs),
         "--index",
-        str(Path(index_path)),
+        str(index_abs),
     ]
     if cfg.rvc.extra_args:
         cmd += cfg.rvc.extra_args.split()
 
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(repo_root))
     if r.returncode != 0:
         tail = (r.stderr or r.stdout or "").strip()
         if tail:
