@@ -35,6 +35,11 @@ Story beats:
 Keep it a generic parody vibe (no real anime/cartoon IP names).
 """
 
+OUTLINE_CONTINUE_SYSTEM = """Continue a Dev-aemon outline. Reply with ONLY new lines in pipe format.
+Each line: N|scene|emotion|spoken_line OR D|scene|emotion|spoken_line
+scene is 1-4. spoken_line must NOT contain the | character.
+No markdown, no numbering, no explanation, no thinking."""
+
 
 _OUTLINE_LINE_RE = re.compile(
     r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$"
@@ -114,8 +119,63 @@ def _script_from_outline(*, topic: str, outline: str) -> Script:
     return Script(title=_human_title(topic), topic=topic, segments=segments)
 
 
-def _outline_line_count(outline: str) -> int:
-    return len(_extract_outline_lines(outline))
+def _outline_join(rows: list[str]) -> str:
+    return "\n".join(rows)
+
+
+def _dedupe_append_rows(existing: list[str], new_rows: list[str]) -> int:
+    """Append rows not already present (case-insensitive full-line match). Returns how many were added."""
+    seen = {r.strip().lower() for r in existing}
+    added = 0
+    for r in new_rows:
+        key = r.strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        existing.append(r)
+        added += 1
+    return added
+
+
+def _pad_outline_rows(topic: str, rows: list[str]) -> None:
+    """
+    Last resort: append template beats so the pipeline always has 6 lines.
+    Wording references the topic slug so pads still feel on-theme.
+    """
+    t = topic.strip() or "tech"
+    templates: list[tuple[str, str, str, str]] = [
+        (
+            "D",
+            "2",
+            "excited",
+            f"Arre {t} ke liye mere paas ek naya pocket-gadget hai — ek baar try toh kar bhai.",
+        ),
+        (
+            "N",
+            "2",
+            "skeptical",
+            "Gadget se pehle bhi pipeline toot chuki hai… ab bharosa kaise karu?",
+        ),
+        (
+            "D",
+            "3",
+            "focused",
+            f"Chal practical: pehle conflict markers dhundh, fix kar, phir `git add` + commit — {t} tabhi settle hoga.",
+        ),
+        (
+            "N",
+            "4",
+            "panicked",
+            f"Bhai ab CI bhi roast kar raha hai — {t} ne poora deploy hi ulta kar diya!",
+        ),
+    ]
+    i = 0
+    while len(rows) < 6 and i < len(templates):
+        who, scene, emotion, spoken = templates[i]
+        rows.append(f"{who}|{scene}|{emotion}|{spoken}")
+        i += 1
+    while len(rows) < 6:
+        rows.append(f"N|4|tired|Bas yaar, {t} se tang aa gaya — ab coffee break mandatory hai.")
 
 
 def _extract_outline_lines(raw: str) -> list[str]:
@@ -143,7 +203,7 @@ def _extract_outline_lines(raw: str) -> list[str]:
     return lines
 
 
-def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> str:
+def _fetch_outline_raw(*, client: OpenAI, model: str, topic: str, strict: bool) -> str:
     if strict:
         outline_user = (
             f"Tech topic: {topic}\n"
@@ -152,7 +212,7 @@ def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> s
             "No blank lines. No other text.\n"
         )
         temp = 0.0
-        max_tok = 500
+        max_tok = 1200
     else:
         outline_user = (
             f"Tech topic: {topic}\n"
@@ -160,7 +220,7 @@ def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> s
             "If you output anything except those 6 lines, you failed.\n"
         )
         temp = 0.1
-        max_tok = 650
+        max_tok = 1400
 
     outline_resp = client.chat.completions.create(
         model=model,
@@ -175,8 +235,35 @@ def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> s
     outline = (getattr(outline_msg, "content", None) or getattr(outline_msg, "reasoning", None) or "").strip()
     if not outline:
         raise ValueError("LLM returned empty outline.")
-    cleaned = "\n".join(_extract_outline_lines(outline))
-    return cleaned
+    return outline
+
+
+def _fetch_outline_continue_raw(
+    *, client: OpenAI, model: str, topic: str, existing: list[str]
+) -> str:
+    need = 6 - len(existing)
+    if need <= 0:
+        return ""
+    user = (
+        f"Tech topic: {topic}\n\n"
+        "These lines are already written — do NOT repeat them; output ONLY new lines:\n"
+        f"{_outline_join(existing)}\n\n"
+        f"Write EXACTLY {need} new line(s) in the same pipe format.\n"
+        "Continue story beats: gadget/tease (if missing), concrete terminal tip, then chaos ending.\n"
+        "No blank lines, no other text.\n"
+    )
+    outline_resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": OUTLINE_CONTINUE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        temperature=0.15,
+        max_tokens=1200,
+    )
+    outline_msg = outline_resp.choices[0].message
+    text = (getattr(outline_msg, "content", None) or getattr(outline_msg, "reasoning", None) or "").strip()
+    return text
 
 
 def generate_script(topic: str, cfg: AppConfig) -> Script:
@@ -186,17 +273,32 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
         timeout=cfg.qwen.timeout_s,
     )
 
-    outline = ""
+    rows: list[str] = []
     for strict in (True, True, False, False):
-        outline = _fetch_outline(client=client, model=cfg.qwen.model, topic=topic, strict=strict)
-        if _outline_line_count(outline) >= 6:
+        raw = _fetch_outline_raw(client=client, model=cfg.qwen.model, topic=topic, strict=strict)
+        _dedupe_append_rows(rows, _extract_outline_lines(raw))
+        if len(rows) >= 6:
             break
-    if _outline_line_count(outline) < 6:
-        snippet = outline[:2000]
-        raise ValueError(
-            "Outline had too few valid lines. Expected format N|scene|emotion|text per line.\n"
-            f"Got {_outline_line_count(outline)} valid lines. Snippet:\n{snippet}"
-        )
 
-    script = _script_from_outline(topic=topic, outline=outline)
-    return script
+    stagnant = 0
+    for _ in range(10):
+        if len(rows) >= 6:
+            break
+        before = len(rows)
+        raw = _fetch_outline_continue_raw(
+            client=client, model=cfg.qwen.model, topic=topic, existing=rows
+        )
+        _dedupe_append_rows(rows, _extract_outline_lines(raw))
+        if len(rows) == before:
+            stagnant += 1
+            if stagnant >= 3:
+                break
+        else:
+            stagnant = 0
+
+    if len(rows) < 6:
+        _pad_outline_rows(topic, rows)
+
+    rows = rows[:6]
+    outline = _outline_join(rows)
+    return _script_from_outline(topic=topic, outline=outline)
