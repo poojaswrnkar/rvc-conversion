@@ -9,37 +9,48 @@ from .config import AppConfig
 from .schema import Script
 
 
-SYSTEM_PROMPT = """You are an expert content creator for "Dev-aemon", a tech-focused parody inspired-by Doraemon.
-Write a ~60-second video script in Hinglish (Hindi + English) using 2026 dev slang.
+OUTLINE_SYSTEM = """You are writing a short Dev-aemon style script (Hinglish, 2026 dev slang).
 
-CHARACTER GUIDELINES:
-1) Nobita (Junior Dev): whiny, stressed, "aura minus 1000", "brain rot code", "crash out" vibes.
-2) Doraemon (Senior AI): rational, slightly condescending but helpful. Introduces a real-world tool as a "Gadget".
+Output rules (STRICT):
+- Do NOT write JSON.
+- Do NOT write a "thinking process" or numbered analysis.
+- Output ONLY compact lines in this exact format (one segment per line):
 
-SCRIPT STRUCTURE:
-Scene 1: Nobita panics about the specific tech topic
-Scene 2: Doraemon reveals gadget (include "Tadaaa!" cue)
-Scene 3: Realistic technical explanation (actionable) of how the gadget solves the topic
-Scene 4: Funny chaos ending where Nobita overuses it and breaks something
+N|scene|emotion|line text here
+D|scene|emotion|line text here
 
-OUTPUT REQUIREMENTS:
-- Output ONLY valid JSON (no markdown, no code fences, no commentary, no "thinking process").
-- The first character of your reply MUST be `{` and the last character MUST be `}`.
-- Use this schema exactly:
+Where:
+- N = Nobita, D = Doraemon
+- scene is 1-4
+- emotion is a short label (e.g. panicking, calm, heroic)
+- line text is short for TTS
+
+Content rules:
+- 6-8 lines total.
+- Alternate N and D frequently.
+- Scene 3 must include at least one concrete terminal/command tip.
+- Avoid real IP/copyright names.
+"""
+
+
+JSON_FORMAT_SYSTEM = """You convert an outline into STRICT JSON only.
+
+Output rules (STRICT):
+- Output ONLY one JSON object.
+- First character MUST be `{`, last character MUST be `}`.
+- No markdown, no code fences, no commentary, no thinking.
+
+JSON schema:
 {
   "title": "...",
   "topic": "...",
   "segments": [
-    {"char":"Nobita","text":"...","emotion":"crying","scene":1,"mood_prompt":"Angry Nobita, 90s anime aesthetic, legally-distinct"},
-    {"char":"Doraemon","text":"...","emotion":"heroic","scene":2,"mood_prompt":"Happy robot mentor, 90s anime aesthetic, legally-distinct"}
+    {"char":"Nobita","text":"...","emotion":"...","scene":1,"mood_prompt":"..."},
+    {"char":"Doraemon","text":"...","emotion":"...","scene":2,"mood_prompt":"..."}
   ]
 }
 
-Rules:
-- 6-8 segments total; keep lines short for TTS.
-- Alternate characters frequently.
-- Include at least 1 concrete technical tip/command in Scene 3.
-- Avoid real IP/copyright names; say "Doraemon-proxy" only in mood_prompt if needed.
+mood_prompt should be a short image prompt: character + mood + "90s anime aesthetic, legally-distinct".
 """
 
 
@@ -82,21 +93,39 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
         timeout=cfg.qwen.timeout_s,
     )
 
-    user_prompt = f"Tech topic: {topic}\nWrite the script JSON now."
-    resp = client.chat.completions.create(
+    outline_user = f"Tech topic: {topic}\nWrite the outline now."
+    outline_resp = client.chat.completions.create(
         model=cfg.qwen.model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": OUTLINE_SYSTEM},
+            {"role": "user", "content": outline_user},
         ],
-        temperature=0.2,
-        # Enough room for 6-8 segments; too small truncates before JSON closes.
-        max_tokens=1600,
+        temperature=0.35,
+        max_tokens=700,
+    )
+    outline_msg = outline_resp.choices[0].message
+    outline = (getattr(outline_msg, "content", None) or getattr(outline_msg, "reasoning", None) or "").strip()
+    if not outline:
+        raise ValueError("LLM returned empty outline.")
+
+    json_user = (
+        f"Topic slug for JSON.topic field: {topic}\n"
+        f"Pick a catchy JSON.title.\n"
+        f"Convert this outline into JSON:\n\n{outline}\n"
+    )
+    json_resp = client.chat.completions.create(
+        model=cfg.qwen.model,
+        messages=[
+            {"role": "system", "content": JSON_FORMAT_SYSTEM},
+            {"role": "user", "content": json_user},
+        ],
+        temperature=0.0,
+        max_tokens=1400,
     )
 
     # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
     # return text in `reasoning` with `content=None`.
-    msg = resp.choices[0].message
+    msg = json_resp.choices[0].message
     content = (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
     data = _extract_json(content)
     data.setdefault("topic", topic)
