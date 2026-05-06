@@ -13,6 +13,38 @@ from .config import AppConfig, Character
 from .utils import ensure_dir
 
 
+def _resolve_rvc_python(cfg: AppConfig) -> str:
+    """
+    Pick a Python that actually exists on disk.
+
+    config.yaml often ships with another user's conda path; stale values cause
+    posix_spawn FileNotFoundError before we can surface an RVC stderr hint.
+    """
+    seen: set[str] = set()
+    candidates: list[str] = []
+    if cfg.rvc.python:
+        candidates.append(str(Path(cfg.rvc.python)))
+    env_py = os.environ.get("APPLIO_PYTHON", "").strip()
+    if env_py:
+        candidates.append(str(Path(env_py)))
+    candidates.append(sys.executable)
+
+    for cand in candidates:
+        if not cand or cand in seen:
+            continue
+        seen.add(cand)
+        p = Path(cand)
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p.resolve())
+
+    tried = ", ".join(repr(c) for c in candidates if c)
+    raise FileNotFoundError(
+        "No usable Python executable for RVC. Set `rvc.python` in config.yaml to your "
+        "Applio/torch environment (must exist on this machine), or export APPLIO_PYTHON. "
+        f"Checked: [{tried}]"
+    )
+
+
 async def tts_to_wav(
     *,
     text: str,
@@ -85,7 +117,7 @@ def run_rvc(
         subprocess.run(cmd_str, shell=True, check=True)
         return out_wav
 
-    py = cfg.rvc.python or sys.executable
+    py = _resolve_rvc_python(cfg)
     cmd = [
         str(py),
         str(cli),
