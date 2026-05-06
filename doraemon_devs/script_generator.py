@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
 
 from openai import OpenAI
-from pydantic import ValidationError
 
 from .config import AppConfig
-from .schema import Script
+from .schema import Character, Script, Segment
 
 
 OUTLINE_SYSTEM = """Write a Dev-aemon style script (Hinglish + 2026 dev slang).
@@ -25,6 +22,7 @@ Rules:
 - scene is 1-4 (integer)
 - emotion is a short English label
 - spoken_line is short, natural dialogue (may include Hindi+English mix)
+- spoken_line MUST NOT contain the `|` character
 - Do NOT copy template phrases like "Short line here"
 - Do NOT explain, do NOT number steps, do NOT use markdown, do NOT use backticks
 
@@ -37,26 +35,6 @@ Story beats:
 Keep it a generic parody vibe (no real anime/cartoon IP names).
 """
 
-
-JSON_FORMAT_SYSTEM = """You convert an outline into STRICT JSON only.
-
-Output rules (STRICT):
-- Output ONLY one JSON object.
-- First character MUST be `{`, last character MUST be `}`.
-- No markdown, no code fences, no commentary, no thinking.
-
-JSON schema:
-{
-  "title": "...",
-  "topic": "...",
-  "segments": [
-    {"char":"Nobita","text":"...","emotion":"...","scene":1,"mood_prompt":"..."},
-    {"char":"Doraemon","text":"...","emotion":"...","scene":2,"mood_prompt":"..."}
-  ]
-}
-
-mood_prompt should be a short image prompt: character + mood + "90s anime aesthetic, legally-distinct".
-"""
 
 _OUTLINE_LINE_RE = re.compile(
     r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$"
@@ -71,8 +49,14 @@ def _clean_spoken_field(s: str) -> str:
 
 
 def _is_junk_outline_line(spoken: str) -> bool:
-    t = spoken.lower()
-    if len(spoken.strip()) < 8:
+    t = spoken.lower().strip()
+    if len(t) < 8:
+        return True
+    if t.startswith("...") or re.match(r"^\s*\.\.\.\s*\(", spoken):
+        return True
+    if re.match(r"^\s*\(\s*(nobita|doraemon)\b", t):
+        return True
+    if "|" in spoken:
         return True
     junk_markers = (
         "short line here",
@@ -88,36 +72,46 @@ def _is_junk_outline_line(spoken: str) -> bool:
     return any(m in t for m in junk_markers)
 
 
-def _extract_json(text: str) -> dict[str, Any]:
-    """
-    vLLM/Qwen setups sometimes return long preambles (or put text in `reasoning`).
-    We decode the first complete JSON object in the string.
-    """
-    raw = text.strip()
-    if not raw:
-        raise ValueError("LLM returned empty text; cannot parse JSON.")
+def _human_title(topic: str) -> str:
+    s = topic.replace("-", " ").replace("_", " ").strip()
+    return s[:1].upper() + s[1:] if s else "Episode"
 
-    # Strip common ```json fences if present
-    if raw.startswith("```"):
-        first_nl = raw.find("\n")
-        if first_nl != -1:
-            raw = raw[first_nl + 1 :]
-        if raw.rstrip().endswith("```"):
-            raw = raw.rstrip()[:-3].rstrip()
 
-    decoder = json.JSONDecoder()
-    for i, ch in enumerate(raw):
-        if ch != "{":
-            continue
-        try:
-            obj, _end = decoder.raw_decode(raw[i:])
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
+def _mood_prompt(*, char: str, emotion: str, topic: str) -> str:
+    return f"{char}, {emotion}, tech chaos about {topic}, 90s anime aesthetic, legally-distinct"
 
-    snippet = raw[:4000]
-    raise ValueError(f"Could not find a JSON object in LLM output. Snippet:\n{snippet}")
+
+def _script_from_outline(*, topic: str, outline: str) -> Script:
+    rows = _extract_outline_lines(outline)
+    if len(rows) < 6:
+        raise ValueError(f"Expected 6 outline lines, got {len(rows)}.")
+
+    segments: list[Segment] = []
+    for row in rows[:8]:
+        parts = row.split("|")
+        if len(parts) != 4:
+            raise ValueError(f"Bad outline row (expected 4 fields): {row!r}")
+        who, scene_s, emotion, text = parts
+        who = who.strip().upper()
+        if who not in {"N", "D"}:
+            raise ValueError(f"Bad speaker in row: {row!r}")
+        char: Character = "Nobita" if who == "N" else "Doraemon"
+        scene = int(scene_s)
+        emotion = emotion.strip()
+        text = _clean_spoken_field(text)
+        if not text or "|" in text:
+            raise ValueError(f"Bad spoken text in row: {row!r}")
+        segments.append(
+            Segment(
+                char=char,
+                text=text,
+                emotion=emotion,
+                scene=scene,
+                mood_prompt=_mood_prompt(char=char, emotion=emotion, topic=topic),
+            )
+        )
+
+    return Script(title=_human_title(topic), topic=topic, segments=segments)
 
 
 def _outline_line_count(outline: str) -> int:
@@ -204,42 +198,5 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
             f"Got {_outline_line_count(outline)} valid lines. Snippet:\n{snippet}"
         )
 
-    last_err: Exception | None = None
-    for attempt in range(3):
-        json_user = (
-            f"Topic slug for JSON.topic field: {topic}\n"
-            f"Pick a catchy JSON.title.\n"
-            f"Convert EVERY line of the outline into EXACTLY one segment.\n"
-            f"The segments array MUST contain 6-8 items (minimum 4).\n"
-            f"Do not merge lines. Do not drop lines.\n\n"
-            f"Outline:\n{outline}\n"
-        )
-        if attempt > 0 and last_err is not None:
-            json_user += (
-                f"\nYour previous JSON was invalid: {last_err}\n"
-                "Fix it. Ensure segments length is 6-8.\n"
-            )
-
-        json_resp = client.chat.completions.create(
-            model=cfg.qwen.model,
-            messages=[
-                {"role": "system", "content": JSON_FORMAT_SYSTEM},
-                {"role": "user", "content": json_user},
-            ],
-            temperature=0.0,
-            max_tokens=1800,
-        )
-
-        # Some OpenAI-compatible servers (notably certain Qwen/vLLM configs)
-        # return text in `reasoning` with `content=None`.
-        msg = json_resp.choices[0].message
-        content = (getattr(msg, "content", None) or getattr(msg, "reasoning", None) or "").strip()
-        try:
-            data = _extract_json(content)
-            data.setdefault("topic", topic)
-            return Script.model_validate(data)
-        except (ValueError, json.JSONDecodeError, ValidationError) as e:
-            last_err = e
-            continue
-
-    raise RuntimeError(f"Failed to generate a valid Script after retries. Last error: {last_err}")
+    script = _script_from_outline(topic=topic, outline=outline)
+    return script
