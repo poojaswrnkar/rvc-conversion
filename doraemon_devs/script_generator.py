@@ -82,8 +82,31 @@ def _human_title(topic: str) -> str:
     return s[:1].upper() + s[1:] if s else "Episode"
 
 
+def character_visual_anchor(char: str) -> str:
+    """Concrete SD-friendly looks (original archetypes, not IP names)."""
+    if char.strip().lower() in {"nobita", "nobi"}:
+        return (
+            "teen boy with round glasses and short black hair, yellow polo shirt, "
+            "expressive face, waist-up shot, simple apartment or desk background"
+        )
+    return (
+        "small round blue robot mascot, red collar, white belly, golden bell on collar, "
+        "no ears, friendly cartoon eyes, waist-up, futuristic gadget room background"
+    )
+
+
+def default_visual_prompt(*, char: str, emotion: str, topic: str) -> str:
+    """Single-image Comfy prompt: one clear character, readable emotion, on-topic."""
+    anchor = character_visual_anchor(char)
+    return (
+        f"masterpiece, best quality, single main character, centered composition, "
+        f"{anchor}, emotion: {emotion}, context: software developer stress about {topic}, "
+        f"1990s cel-shaded anime, clean lineart, solid colors, coherent anatomy, not crowded"
+    )
+
+
 def _mood_prompt(*, char: str, emotion: str, topic: str) -> str:
-    return f"{char}, {emotion}, tech chaos about {topic}, 90s anime aesthetic, legally-distinct"
+    return default_visual_prompt(char=char, emotion=emotion, topic=topic)
 
 
 def _script_from_outline(*, topic: str, outline: str) -> Script:

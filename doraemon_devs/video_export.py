@@ -19,9 +19,14 @@ def _run_ffmpeg(args: list[str]) -> None:
         raise RuntimeError(f"ffmpeg failed ({r.returncode}): {err[-2000:]}")
 
 
-def _segment_image_path(images_dir: Path, idx: int, seg_char: str, seg_emotion: str) -> Path:
+def _find_segment_still(images_dir: Path, idx: int, seg_char: str, seg_emotion: str) -> Path | None:
+    """Comfy SaveImage may be .png / .webp / .jpg depending on workflow or settings."""
     stem = slugify(f"{idx:03d}_{seg_char}_{seg_emotion}")
-    return images_dir / f"{stem}.png"
+    for ext in (".png", ".webp", ".jpg", ".jpeg"):
+        p = images_dir / f"{stem}{ext}"
+        if p.is_file():
+            return p
+    return None
 
 
 def try_build_master_mp4(
@@ -52,12 +57,17 @@ def try_build_master_mp4(
     clips: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="devaemon_mp4_") as tmp:
         tmp_root = Path(tmp)
+        last_still: Path | None = None
         for i, seg in enumerate(script.segments, start=1):
             wav = segment_wavs[i - 1]
             clip_path = tmp_root / f"clip_{i:03d}.mp4"
-            img = _segment_image_path(images_dir, i, seg.char, seg.emotion)
+            img = _find_segment_still(images_dir, i, seg.char, seg.emotion)
+            if img is not None:
+                last_still = img
+            elif last_still is not None:
+                img = last_still
 
-            if img.is_file():
+            if img is not None and img.is_file():
                 _run_ffmpeg(
                     [
                         "-loop",

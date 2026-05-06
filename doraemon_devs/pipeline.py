@@ -7,6 +7,7 @@ from .audio_engine import concat_wavs, render_segment_audio
 from .comfyui_client import try_generate_image, try_generate_media
 from .config import AppConfig
 from .schema import Script
+from .script_generator import default_visual_prompt
 from .utils import ensure_dir, slugify, timestamp_id
 from .video_export import try_build_master_mp4
 from .video_clips_export import build_master_mp4_from_clips
@@ -37,7 +38,7 @@ def run_pipeline(
         prompt = (
             seg.video_prompt
             or seg.mood_prompt
-            or f"{seg.emotion} {seg.char}, 90s anime aesthetic, legally-distinct"
+            or default_visual_prompt(char=seg.char, emotion=seg.emotion, topic=script.topic)
         )
         try:
             if make_mp4_clips:
@@ -72,6 +73,7 @@ def run_pipeline(
                     prompt_text=prompt,
                     out_dir=images_dir,
                     filename_prefix=f"{i:03d}_{seg.char}_{seg.emotion}",
+                    timeout_s=cfg.comfyui.poll_timeout_s,
                 )
         except Exception:
             if make_mp4_clips:
