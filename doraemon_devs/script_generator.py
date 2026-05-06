@@ -11,27 +11,24 @@ from .config import AppConfig
 from .schema import Script
 
 
-OUTLINE_SYSTEM = """You are writing a short Dev-aemon style script (Hinglish, 2026 dev slang).
+OUTLINE_SYSTEM = """Write a Dev-aemon style script (Hinglish + 2026 dev slang).
 
-Output rules (STRICT):
-- Do NOT write JSON.
-- Do NOT write a "thinking process" or numbered analysis.
-- Output ONLY compact lines in this exact format (one segment per line):
+Your ENTIRE reply must be 6 to 8 lines.
+Each line MUST look exactly like:
 
-N|scene|emotion|line text here
-D|scene|emotion|line text here
+N|1|panicking|Short line here
+D|2|calm|Short line here
 
-Where:
-- N = Nobita, D = Doraemon
+Rules per line:
+- Start with N (Nobita) or D (Doraemon)
 - scene is 1-4
-- emotion is a short label (e.g. panicking, calm, heroic)
-- line text is short for TTS
+- emotion is a short English label
+- last field is the spoken line (short, TTS-friendly)
 
-Content rules:
-- 6-8 lines total.
-- Alternate N and D frequently.
-- Scene 3 must include at least one concrete terminal/command tip.
-- Avoid real IP/copyright names.
+Content:
+- Alternate N and D
+- Scene 3 must include one real terminal/command snippet (e.g. git/docker) inside the line text
+- Do not mention real anime/cartoon IP; keep it a generic parody vibe
 """
 
 
@@ -55,7 +52,13 @@ JSON schema:
 mood_prompt should be a short image prompt: character + mood + "90s anime aesthetic, legally-distinct".
 """
 
-_OUTLINE_LINE_RE = re.compile(r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$")
+_OUTLINE_LINE_RE = re.compile(
+    r"^\s*([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$"
+)
+# Same pattern, but can appear anywhere in a noisy line (model adds bullets/backticks)
+_OUTLINE_LINE_FIND_RE = re.compile(
+    r"([ND])\s*\|\s*([1-4])\s*\|\s*([^|]+?)\s*\|\s*(.+?)(?:\s*`*)$"
+)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -91,35 +94,60 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 
 def _outline_line_count(outline: str) -> int:
-    n = 0
-    for line in outline.splitlines():
-        if _OUTLINE_LINE_RE.match(line):
-            n += 1
-    return n
+    return len(_extract_outline_lines(outline))
 
 
-def _fetch_outline(*, client: OpenAI, model: str, topic: str) -> str:
-    outline_user = (
-        f"Tech topic: {topic}\n"
-        "Write the outline now.\n"
-        "You MUST output between 6 and 8 lines inclusive.\n"
-        "Each line MUST match: N|scene|emotion|text OR D|scene|emotion|text\n"
-        "Do not output fewer than 6 lines.\n"
-    )
+def _extract_outline_lines(raw: str) -> list[str]:
+    """Pull valid `N|...` lines out of model noise (thinking dumps, bullets, etc.)."""
+    lines: list[str] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        m = _OUTLINE_LINE_RE.match(s)
+        if m:
+            lines.append(f"{m.group(1)}|{m.group(2)}|{m.group(3).strip()}|{m.group(4).strip()}")
+            continue
+        m2 = _OUTLINE_LINE_FIND_RE.search(s)
+        if m2:
+            lines.append(
+                f"{m2.group(1)}|{m2.group(2)}|{m2.group(3).strip()}|{m2.group(4).strip()}"
+            )
+    return lines
+
+
+def _fetch_outline(*, client: OpenAI, model: str, topic: str, strict: bool) -> str:
+    if strict:
+        outline_user = (
+            f"Tech topic: {topic}\n"
+            "Reply with ONLY 6 lines in the pipe format. No other words.\n"
+        )
+        temp = 0.0
+        max_tok = 350
+    else:
+        outline_user = (
+            f"Tech topic: {topic}\n"
+            "Write 6-8 outline lines in the pipe format.\n"
+            "If you start explaining, you failed—delete it and output only lines.\n"
+        )
+        temp = 0.2
+        max_tok = 500
+
     outline_resp = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": OUTLINE_SYSTEM},
             {"role": "user", "content": outline_user},
         ],
-        temperature=0.35,
-        max_tokens=700,
+        temperature=temp,
+        max_tokens=max_tok,
     )
     outline_msg = outline_resp.choices[0].message
     outline = (getattr(outline_msg, "content", None) or getattr(outline_msg, "reasoning", None) or "").strip()
     if not outline:
         raise ValueError("LLM returned empty outline.")
-    return outline
+    cleaned = "\n".join(_extract_outline_lines(outline))
+    return cleaned
 
 
 def generate_script(topic: str, cfg: AppConfig) -> Script:
@@ -130,8 +158,8 @@ def generate_script(topic: str, cfg: AppConfig) -> Script:
     )
 
     outline = ""
-    for _ in range(2):
-        outline = _fetch_outline(client=client, model=cfg.qwen.model, topic=topic)
+    for strict in (True, False, False):
+        outline = _fetch_outline(client=client, model=cfg.qwen.model, topic=topic, strict=strict)
         if _outline_line_count(outline) >= 6:
             break
     if _outline_line_count(outline) < 4:
