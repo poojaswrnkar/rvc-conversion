@@ -31,7 +31,9 @@ comfyui:
   workflow_json_path: "./comfy/workflows/character_gen.json"
   # Same graph by default; PNG/JPEG outputs are turned into per-segment MP4 via ffmpeg.
   video_workflow_json_path: "./comfy/workflows/video_clip.json"
-  # Must match a filename inside ComfyUI's models/checkpoints/ (override default in JSON).
-  # Example: "realisticVisionV51_v51VAE.safetensors"
+  # Must match a filename under ComfyUI/models/checkpoints/ on the Comfy host (see comfy/workflows/*.json).
+  # Default in JSON matches Comfy's usual v1.5 name once you download it:
+  #   wget -O models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors \
+  #     "https://huggingface.co/Comfy-Org/stable-diffusion-v1-5-archive/resolve/main/v1-5-pruned-emaonly-fp16.safetensors"
   checkpoint: null
   poll_timeout_s: 180
